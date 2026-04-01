@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 import streamlit as st
-from pawpal_system import Owner, Pet, Task, Frequency, Priority
+from pawpal_system import Owner, Pet, Task, Frequency, Priority, TaskStatus
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 st.title("🐾 PawPal+")
@@ -104,24 +104,77 @@ st.divider()
 # ── Section 3: Today's Schedule ──────────────────────────────────────────────
 st.subheader("Today's Schedule")
 
-if st.button("Generate Schedule"):
-    # owner.view_schedule() calls scheduler.load_tasks_from_owner() internally
-    # and returns all tasks sorted by due date
-    schedule = owner.view_schedule()
+# Pull all tasks into the scheduler so filters and sort work on a full picture
+owner.scheduler.load_tasks_from_owner(owner)
+scheduler = owner.scheduler
 
-    if not schedule:
-        st.info("No tasks scheduled yet.")
-    else:
-        st.table([
+# ── Conflict warnings (always visible when tasks exist) ───────────────────────
+conflicts = scheduler.check_conflicts()
+if conflicts:
+    st.error(f"⚠️ {len(conflicts)} scheduling conflict(s) detected — review before the day starts.")
+    with st.expander("View conflict details", expanded=True):
+        for warning in conflicts:
+            # SAME PET conflicts are harder problems than OWNER conflicts
+            if "SAME PET" in warning:
+                st.warning(f"🐾 **Same-pet double-booking:** {warning.split(']')[1].strip()}")
+            else:
+                st.warning(f"👤 **Owner time clash:** {warning.split(']')[1].strip()}")
+
+# ── Filter controls ───────────────────────────────────────────────────────────
+filter_col1, filter_col2 = st.columns(2)
+with filter_col1:
+    status_options = ["All"] + [s.value.capitalize() for s in TaskStatus]
+    selected_status_label = st.selectbox("Filter by status", status_options)
+with filter_col2:
+    pet_name_filter = st.text_input("Filter by pet name (partial match)", value="")
+
+# Resolve the chosen status back to a TaskStatus enum (or None for "All")
+selected_status = (
+    None
+    if selected_status_label == "All"
+    else TaskStatus(selected_status_label.lower())
+)
+
+# ── Build sorted, filtered task list ─────────────────────────────────────────
+filtered = scheduler.filter_tasks(
+    status=selected_status,
+    pet_name=pet_name_filter if pet_name_filter.strip() else None,
+)
+sorted_tasks = scheduler.sort_by_time(tasks=filtered)
+
+# ── Display ───────────────────────────────────────────────────────────────────
+if not sorted_tasks:
+    st.info("No tasks match the current filters.")
+else:
+    # Status → badge emoji so the table is scannable at a glance
+    STATUS_ICON = {
+        TaskStatus.PENDING:   "🔵 Pending",
+        TaskStatus.COMPLETED: "✅ Completed",
+        TaskStatus.OVERDUE:   "🔴 Overdue",
+        TaskStatus.CANCELLED: "⚫ Cancelled",
+    }
+
+    st.dataframe(
+        [
             {
-                "Time": t.due_date.strftime("%I:%M %p"),
-                "Task": t.title,
-                "Pet": t.assigned_pet.name,
-                "Duration": f"{t.duration_minutes} min",
-                "Priority": t.priority.value.capitalize(),
+                "Time":      t.due_date.strftime("%I:%M %p"),
+                "Task":      t.title,
+                "Pet":       t.assigned_pet.name,
+                "Duration":  f"{t.duration_minutes} min",
+                "Priority":  t.priority.value.capitalize(),
                 "Frequency": t.frequency.value.capitalize(),
-                "Status": t.status.value.upper(),
+                "Status":    STATUS_ICON.get(t.status, t.status.value),
             }
-            for t in schedule
-        ])
-        st.caption(f"{len(schedule)} task(s) across {len(pets)} pet(s)")
+            for t in sorted_tasks
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    # Summary line
+    overdue_count = sum(1 for t in sorted_tasks if t.status == TaskStatus.OVERDUE)
+    summary = f"{len(sorted_tasks)} task(s) shown"
+    if overdue_count:
+        st.warning(f"🔴 {overdue_count} overdue task(s) in this view — reschedule or complete them.")
+    else:
+        st.success(f"✅ {summary} — no overdue tasks in this view.")
