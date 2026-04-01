@@ -55,3 +55,5 @@ python -m pytest
 
 All 14 tests pass, covering sorting correctness, recurrence logic, and conflict detection.
 
+##Demo
+![Demo Image](StreamlitSS.png)
