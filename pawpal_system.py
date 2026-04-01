@@ -150,6 +150,63 @@ class Scheduler:
     def remove_task(self, task_id: str) -> None:
         self.tasks = [t for t in self.tasks if t.task_id != task_id]
 
+    def check_conflicts(self) -> list[str]:
+        """Scan all active tasks for time-window overlaps and return warning messages.
+
+        Compares every pair of non-cancelled, non-completed tasks using an
+        interval overlap test: two tasks conflict when
+        ``A.start < B.end and B.start < A.end``. This detects partial overlaps,
+        full containment, and exact same-start collisions without raising
+        exceptions — callers receive warnings and decide how to present them.
+
+        Two severity levels are reported:
+            - ``[CONFLICT - SAME PET]``: the same pet is double-booked (hard conflict).
+            - ``[CONFLICT - OWNER]``: different pets share the owner's time slot
+              (soft conflict — the owner cannot attend both simultaneously).
+
+        Returns:
+            list[str]: Human-readable warning strings, one per conflicting pair.
+                Returns an empty list when no conflicts exist.
+
+        Example::
+
+            warnings = scheduler.check_conflicts()
+            for w in warnings:
+                print(w)
+        """
+        warnings: list[str] = []
+        active = [
+            t for t in self.tasks
+            if t.status not in (TaskStatus.CANCELLED, TaskStatus.COMPLETED)
+        ]
+
+        for i, a in enumerate(active):
+            for b in active[i + 1:]:
+                a_start = a.due_date
+                a_end   = a_start + timedelta(minutes=a.duration_minutes)
+                b_start = b.due_date
+                b_end   = b_start + timedelta(minutes=b.duration_minutes)
+
+                if a_start < b_end and b_start < a_end:
+                    a_time = a_start.strftime("%I:%M %p")
+                    b_time = b_start.strftime("%I:%M %p")
+                    if a.assigned_pet.pet_id == b.assigned_pet.pet_id:
+                        warnings.append(
+                            f"[CONFLICT - SAME PET]  '{a.title}' ({a_time}, "
+                            f"{a.duration_minutes} min) overlaps "
+                            f"'{b.title}' ({b_time}, {b.duration_minutes} min) "
+                            f"-- both assigned to {a.assigned_pet.name}"
+                        )
+                    else:
+                        warnings.append(
+                            f"[CONFLICT - OWNER]     '{a.title}' for "
+                            f"{a.assigned_pet.name} ({a_time}, {a.duration_minutes} min) "
+                            f"overlaps '{b.title}' for "
+                            f"{b.assigned_pet.name} ({b_time}, {b.duration_minutes} min)"
+                        )
+
+        return warnings
+
     def sync_overdue(self) -> None:
         """Scan all tasks and flag any that have passed their due date."""
         for task in self.tasks:
@@ -189,6 +246,89 @@ class Scheduler:
             t for t in self.tasks
             if t.priority == priority and t.status == TaskStatus.PENDING
         ]
+
+    def filter_tasks(
+        self,
+        status: TaskStatus | None = None,
+        pet_name: str | None = None,
+    ) -> list[Task]:
+        """Return tasks filtered by status and/or pet name.
+
+        Both parameters are optional. When both are provided the filters are
+        applied sequentially (status first, then pet name), so the result
+        satisfies *all* supplied criteria. Omitting a parameter disables that
+        filter entirely.
+
+        Args:
+            status (TaskStatus | None): When provided, only tasks whose
+                ``status`` attribute equals this value are returned.
+                For example, ``TaskStatus.PENDING`` or ``TaskStatus.COMPLETED``.
+                Defaults to ``None`` (no status filter).
+            pet_name (str | None): When provided, only tasks whose assigned
+                pet name *contains* this string are returned. The match is
+                case-insensitive and partial, so ``"mo"`` matches ``"Mochi"``.
+                Defaults to ``None`` (no pet-name filter).
+
+        Returns:
+            list[Task]: Tasks that satisfy all supplied filters, in their
+                current scheduler order (unsorted). Pass the result to
+                ``sort_by_time()`` to order chronologically.
+
+        Example::
+
+            # All completed tasks
+            scheduler.filter_tasks(status=TaskStatus.COMPLETED)
+
+            # Pending tasks for any pet whose name contains "luna"
+            scheduler.filter_tasks(status=TaskStatus.PENDING, pet_name="luna")
+        """
+        result = self.tasks
+
+        if status is not None:
+            result = [t for t in result if t.status == status]
+
+        if pet_name is not None:
+            query = pet_name.lower()
+            result = [t for t in result if query in t.assigned_pet.name.lower()]
+
+        return result
+
+    def sort_by_time(self, tasks: list[Task] | None = None) -> list[Task]:
+        """Return tasks sorted chronologically by time-of-day, with priority as a tiebreaker.
+
+        Sorting is performed on the ``HH:MM`` portion of each task's
+        ``due_date``. Because the format is zero-padded and fixed-width,
+        lexicographic string comparison produces correct chronological order
+        (e.g. ``"07:30" < "08:00" < "18:00"``). When two tasks share the
+        same start time, ``HIGH`` priority tasks are listed before ``MEDIUM``
+        and ``LOW``.
+
+        Args:
+            tasks (list[Task] | None): The list of tasks to sort. When
+                ``None``, all tasks currently held by the scheduler are used.
+                Pass a pre-filtered list (e.g. from ``filter_tasks()``) to
+                sort a subset without modifying the scheduler's internal state.
+                Defaults to ``None``.
+
+        Returns:
+            list[Task]: A new sorted list. The scheduler's internal task list
+                is not modified.
+
+        Example::
+
+            # Sort all scheduler tasks
+            scheduler.sort_by_time()
+
+            # Filter then sort — chain the two methods
+            pending = scheduler.filter_tasks(status=TaskStatus.PENDING)
+            scheduler.sort_by_time(tasks=pending)
+        """
+        priority_order = {Priority.HIGH: 0, Priority.MEDIUM: 1, Priority.LOW: 2}
+        source = tasks if tasks is not None else self.tasks
+        return sorted(
+            source,
+            key=lambda t: (t.due_date.strftime("%H:%M"), priority_order.get(t.priority, 1)),
+        )
 
     def send_reminders(self, lookahead_minutes: int = 60) -> None:
         """Fire unsent notifications for tasks due within the lookahead window."""
