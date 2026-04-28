@@ -7,6 +7,9 @@ import anthropic
 
 from pawpal_system import Task
 
+from dotenv import load_dotenv
+load_dotenv()
+
 
 _SYSTEM_PROMPT = (
     "You are an expert pet-care scheduler. Your sole job is to resolve scheduling "
@@ -58,35 +61,33 @@ def generate_conflict_resolution(conflicting_tasks: list[Task]) -> dict:
         f"Tasks:\n{json.dumps(task_summaries, indent=2)}"
     )
 
-    try:
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=512,
-            system=[
-                {
-                    "type": "text",
-                    "text": _SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            messages=[{"role": "user", "content": user_content}],
-        )
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=512,
+        system=[
+            {
+                "type": "text",
+                "text": _SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+        messages=[{"role": "user", "content": user_content}],
+    )
 
-        text_block = next(
-            (block for block in response.content if block.type == "text"), None
-        )
-        if text_block is None:
-            return {}
-        raw = text_block.text.strip()
-        # Strip markdown code fences (```json ... ``` or ``` ... ```)
-        if raw.startswith("```"):
-            raw = raw.split("```", 2)[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.rsplit("```", 1)[0].strip()
-        return json.loads(raw)
-
-    except (anthropic.APIError, json.JSONDecodeError, IndexError, KeyError):
+    text_block = next(
+        (block for block in response.content if block.type == "text"), None
+    )
+    if text_block is None:
         return {}
+
+    raw = text_block.text.strip()
+    # Strip markdown code fences (```json ... ``` or ``` ... ```)
+    if raw.startswith("```"):
+        raw = raw.split("```", 2)[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.rsplit("```", 1)[0].strip()
+
+    return json.loads(raw)

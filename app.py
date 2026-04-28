@@ -126,14 +126,15 @@ if conflicts:
                 t for t in scheduler.tasks
                 if t.status not in (TaskStatus.COMPLETED, TaskStatus.CANCELLED)
             ]
-            with st.spinner("Asking Claude to resolve conflicts..."):
-                resolution = generate_conflict_resolution(active_tasks)
-            if resolution:
+            try:
+                with st.spinner("Asking Claude to resolve conflicts..."):
+                    resolution = generate_conflict_resolution(active_tasks)
                 owner.scheduler.apply_ai_resolution(resolution)
                 st.success("Schedule updated! Refreshing...")
                 st.rerun()
-            else:
-                st.error("AI resolution failed. Please try again or resolve manually.")
+            except Exception as e:
+                st.error("AI resolution failed — see details below.")
+                st.exception(e)
 
 # ── Filter controls ───────────────────────────────────────────────────────────
 filter_col1, filter_col2 = st.columns(2)
