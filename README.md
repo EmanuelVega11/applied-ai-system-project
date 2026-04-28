@@ -71,5 +71,8 @@ This project fundamentally changed how I view AI integration. Instead of treatin
 ### 🧪 Testing Summary
 3 out of 3 automated unit tests passed using `pytest`. The system successfully parsed simulated LLM outputs, stripped unexpected markdown formatting, and gracefully handled API failure simulations without crashing. Adding regex string cleaning significantly improved reliability when the LLM hallucinated code blocks.
 
+### Video Walkthrough
+https://www.loom.com/share/f597290a79f2403794fb62ebec91937b
+
 ##Demo
 ![Demo Image](StreamlitSS.png)
