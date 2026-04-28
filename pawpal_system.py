@@ -340,6 +340,24 @@ class Scheduler:
                 if not notification.sent and notification.scheduled_time <= cutoff:
                     notification.send()
 
+    def apply_ai_resolution(self, resolution: dict[str, str]) -> None:
+        """Apply AI-proposed start times returned by generate_conflict_resolution().
+
+        Args:
+            resolution: Mapping of task_id -> "HH:MM" new start time (24-hour).
+                        Task IDs not present in the dict are left unchanged.
+        """
+        for task in self.tasks:
+            new_time_str = resolution.get(task.task_id)
+            if new_time_str is None:
+                continue
+            try:
+                hour, minute = map(int, new_time_str.split(":"))
+                new_dt = task.due_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                task.reschedule(new_dt)
+            except (ValueError, AttributeError):
+                continue
+
 
 # --- Owner ---
 

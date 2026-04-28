@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 import streamlit as st
 from pawpal_system import Owner, Pet, Task, Frequency, Priority, TaskStatus
+from ai_agent import generate_conflict_resolution
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 st.title("🐾 PawPal+")
@@ -119,6 +120,20 @@ if conflicts:
                 st.warning(f"🐾 **Same-pet double-booking:** {warning.split(']')[1].strip()}")
             else:
                 st.warning(f"👤 **Owner time clash:** {warning.split(']')[1].strip()}")
+
+        if st.button("✨ Auto-Resolve with AI"):
+            active_tasks = [
+                t for t in scheduler.tasks
+                if t.status not in (TaskStatus.COMPLETED, TaskStatus.CANCELLED)
+            ]
+            with st.spinner("Asking Claude to resolve conflicts..."):
+                resolution = generate_conflict_resolution(active_tasks)
+            if resolution:
+                owner.scheduler.apply_ai_resolution(resolution)
+                st.success("Schedule updated! Refreshing...")
+                st.rerun()
+            else:
+                st.error("AI resolution failed. Please try again or resolve manually.")
 
 # ── Filter controls ───────────────────────────────────────────────────────────
 filter_col1, filter_col2 = st.columns(2)
